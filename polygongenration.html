@@ -1,0 +1,1755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPX Waypoint Manager</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- JSZip for KMZ support -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <!-- Markdown Parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- html2canvas for Screenshots -->
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+
+    <!-- D3.js for Contour Generation -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+
+    <style>
+        :root {
+            --village-color: #4ade80; /* Green-400 */
+            --village-size: 14px;
+            --survey-color: #facc15; /* Yellow-400 */
+            --survey-size: 18px;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+            z-index: 1;
+            cursor: crosshair;
+        }
+        
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Map Labels */
+        .map-distance-label {
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #3b82f6;
+            color: #1d4ed8;
+            font-weight: bold;
+            font-size: 11px;
+            padding: 1px 4px;
+            border-radius: 4px;
+            white-space: nowrap;
+            text-align: center;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            width: auto !important;
+            height: auto !important;
+            margin-top: -10px !important;
+        }
+
+        /* Reference Layer Labels (Survey Numbers) */
+        .ref-label {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            white-space: normal !important;
+            pointer-events: none;
+            text-align: center;
+        }
+        
+        .ref-label-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            line-height: 1.2;
+        }
+
+        .leaflet-tooltip.ref-label {
+            background-color: transparent;
+            border: none;
+            box-shadow: none;
+        }
+        .leaflet-tooltip-left.ref-label::before, .leaflet-tooltip-right.ref-label::before {
+            border: none !important;
+        }
+        
+        .hide-ref-labels .ref-label {
+            display: none !important;
+        }
+
+        /* Dynamic Label Styles */
+        .village-text {
+            color: var(--village-color);
+            font-size: var(--village-size);
+            font-weight: bold;
+            text-shadow: -1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000;
+            display: block;
+        }
+        .survey-text {
+            color: var(--survey-color);
+            font-size: var(--survey-size);
+            font-weight: 900;
+            text-shadow: -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000;
+            display: block;
+        }
+
+        /* Bore Well Icon */
+        .borewell-icon {
+            background-color: #0077be;
+            border: 2px solid white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 14px;
+        }
+
+        /* Farmer Location Icon */
+        .farmer-icon {
+            background-color: #d97706; /* Amber-600 */
+            border: 2px solid white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 14px;
+        }
+
+        /* High/Low Point Icons */
+        .high-point-icon {
+            background-color: #22c55e; /* Green */
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        .low-point-icon {
+            background-color: #ef4444; /* Red */
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        
+        /* Contour Labels */
+        .contour-label {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            color: #d97706; /* Amber-600 */
+            font-weight: bold;
+            font-size: 10px;
+            text-shadow: 1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff;
+        }
+
+        /* Overlay */
+        .map-details-overlay {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            z-index: 999;
+            text-align: right;
+            pointer-events: none;
+            font-family: sans-serif;
+            color: #333;
+            background: rgba(255, 255, 255, 0.0);
+            text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+        }
+        .map-details-overlay p {
+            margin-bottom: 4px;
+            font-weight: bold;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .coord-text {
+            font-family: monospace;
+            color: #1e40af;
+            font-size: 12px;
+            background: rgba(255,255,255,0.5);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+
+        /* Loader */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Context Menu */
+        .context-menu {
+            position: absolute;
+            background: white;
+            border: 1px solid #ccc;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 2000;
+            border-radius: 4px;
+            overflow: hidden;
+            display: none;
+            min-width: 150px;
+        }
+        .context-menu-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .context-menu-item:hover { background-color: #f3f4f6; color: #2563eb; }
+        
+        /* Layer Toast */
+        #layerToast {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 1000;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        /* Cadastral Button */
+        .cadastral-btn {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 999;
+            background-color: #eab308;
+            color: #000;
+            font-weight: bold;
+            font-size: 12px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            border: 2px solid #fff;
+            cursor: pointer;
+            transition: transform 0.1s, background-color 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .cadastral-btn:hover { background-color: #ca8a04; transform: translateX(-50%) scale(1.05); }
+        .cadastral-btn:active { transform: translateX(-50%) scale(0.95); }
+
+        /* Style button active state */
+        .style-btn.active {
+            border-color: #3b82f6;
+            transform: scale(1.1);
+        }
+        
+        /* Nav Bar Active State */
+        .nav-btn.active {
+            background-color: #eff6ff; /* blue-50 */
+            color: #2563eb; /* blue-600 */
+            border-bottom: 2px solid #2563eb;
+        }
+        
+        /* Floating Panel Transition */
+        #floatingPanel {
+            transition: transform 0.3s ease-in-out, opacity 0.3s;
+        }
+        .panel-hidden {
+            transform: translateX(-110%);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col overflow-hidden font-sans">
+
+    <!-- Header -->
+    <header class="bg-blue-600 text-white px-4 py-2 shadow-sm flex justify-between items-center z-30 flex-shrink-0">
+        <div class="flex items-center gap-2">
+            <i class="fa-solid fa-map-location-dot text-xl"></i>
+            <h1 class="text-base font-bold leading-none">GPX Waypoint Manager</h1>
+        </div>
+        <div class="flex items-center gap-3">
+            <div id="userInfoDisplay" class="hidden text-[10px] text-right">
+                <p class="font-bold text-white" id="loggedInName">User</p>
+                <!-- Mobile number removed from header UI -->
+            </div>
+            <div class="text-[10px] text-blue-200 bg-blue-700/50 px-2 py-0.5 rounded border border-blue-500/30">
+                @ShrinivasBal
+            </div>
+        </div>
+    </header>
+
+    <!-- Navigation Bar -->
+    <nav class="bg-white border-b border-gray-200 flex overflow-x-auto shadow-sm z-20 flex-shrink-0">
+        <button onclick="window.switchTab('input')" id="tab-input" class="nav-btn active flex-1 min-w-[80px] py-3 text-xs font-bold text-gray-500 hover:text-blue-600 hover:bg-gray-50 transition-colors uppercase tracking-wide flex justify-center items-center gap-1.5 whitespace-nowrap">
+            <i class="fa-solid fa-pen-to-square"></i> Input
+        </button>
+        <button onclick="window.switchTab('reference')" id="tab-reference" class="nav-btn flex-1 min-w-[80px] py-3 text-xs font-bold text-gray-500 hover:text-blue-600 hover:bg-gray-50 transition-colors uppercase tracking-wide flex justify-center items-center gap-1.5 whitespace-nowrap">
+            <i class="fa-solid fa-layer-group"></i> Layers
+        </button>
+        <button onclick="window.switchTab('terrain')" id="tab-terrain" class="nav-btn flex-1 min-w-[80px] py-3 text-xs font-bold text-gray-500 hover:text-blue-600 hover:bg-gray-50 transition-colors uppercase tracking-wide flex justify-center items-center gap-1.5 whitespace-nowrap">
+            <i class="fa-solid fa-mountain-sun"></i> Terrain
+        </button>
+        <button onclick="window.switchTab('cloud')" id="tab-cloud" class="nav-btn flex-1 min-w-[80px] py-3 text-xs font-bold text-gray-500 hover:text-blue-600 hover:bg-gray-50 transition-colors uppercase tracking-wide flex justify-center items-center gap-1.5 whitespace-nowrap">
+            <i class="fa-solid fa-cloud"></i> Cloud
+        </button>
+        <button onclick="window.switchTab('export')" id="tab-export" class="nav-btn flex-1 min-w-[80px] py-3 text-xs font-bold text-gray-500 hover:text-blue-600 hover:bg-gray-50 transition-colors uppercase tracking-wide flex justify-center items-center gap-1.5 whitespace-nowrap">
+            <i class="fa-solid fa-download"></i> Export
+        </button>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="flex-1 relative overflow-hidden">
+        
+        <!-- Map Area -->
+        <div id="map" class="w-full h-full z-0"></div>
+        
+        <!-- Floating Action Panel (Holds Content for all Tabs) -->
+        <div id="floatingPanel" class="absolute top-2 left-2 z-[500] w-[95%] md:w-80 max-h-[85vh] bg-white rounded-lg shadow-xl border border-gray-200 flex flex-col overflow-hidden">
+            
+            <!-- Close Button -->
+            <div class="flex justify-between items-center p-2 border-b border-gray-100 bg-gray-50">
+                <span id="panelTitle" class="text-xs font-bold text-gray-700 uppercase px-1">Input Data</span>
+                <button onclick="window.closePanel()" class="text-gray-400 hover:text-red-500 px-2 transition-colors">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div id="panelContent" class="p-3 overflow-y-auto custom-scrollbar flex-1">
+                
+                <!-- 1. INPUT DATA CONTENT -->
+                <div id="content-input" class="space-y-3">
+                     <div class="flex gap-2 mb-2">
+                        <button onclick="window.toggleAIModal()" class="flex-1 px-3 py-1.5 text-xs rounded font-medium bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700 shadow-sm transition-all flex justify-center items-center gap-1">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> AI Import
+                        </button>
+                        <div class="relative flex-1">
+                            <input type="file" id="fileInput" accept=".gpx,.kml,.kmz" multiple class="hidden" onchange="window.handleFileUpload(this)">
+                            <button onclick="document.getElementById('fileInput').click()" class="w-full px-3 py-1.5 text-xs rounded font-medium bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition-colors flex justify-center items-center gap-2">
+                                <i class="fa-solid fa-file-import"></i> Import File
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="bg-blue-50 p-2 rounded border border-blue-200 shadow-sm relative">
+                        <label class="block text-[10px] font-bold text-blue-800 mb-1 uppercase flex justify-between">
+                            <span><i class="fa-solid fa-faucet-drip mr-1"></i> Bore Well</span>
+                            <span class="text-[9px] font-normal text-blue-500 normal-case">(Drag on map)</span>
+                        </label>
+                        <input type="text" id="boreWellInput" class="w-full p-1.5 text-xs border border-blue-300 rounded focus:outline-none focus:border-blue-500 font-mono" placeholder="N 14 48.66, E 76 56.98" oninput="window.updateMapOverlay()" onchange="window.processInput()">
+                    </div>
+
+                    <div class="bg-gray-50 p-2 rounded border border-gray-200">
+                        <h3 class="text-[10px] font-bold text-gray-500 uppercase mb-2 border-b pb-1 flex justify-between items-center">
+                            <span>Farmer Details</span>
+                            <div class="flex gap-1">
+                                <button onclick="window.handlePasteButton()" class="text-[9px] bg-white text-gray-700 px-2 py-0.5 rounded border border-gray-300 hover:bg-gray-100 flex items-center gap-1 transition-colors">
+                                    <i class="fa-solid fa-paste"></i>
+                                </button>
+                                <button onclick="document.getElementById('docScanInput').click()" class="text-[9px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded border border-purple-200 hover:bg-purple-200 flex items-center gap-1 transition-colors">
+                                    <i class="fa-solid fa-camera"></i> Scan
+                                </button>
+                            </div>
+                            <input type="file" id="docScanInput" accept="image/*" class="hidden" onchange="window.scanFarmerDocument(this.files[0])">
+                        </h3>
+                        <div class="grid grid-cols-2 gap-2">
+                            <input type="text" id="farmerName" class="w-full p-1 text-xs border rounded focus:border-blue-500 outline-none" placeholder="Name" oninput="window.updateMapOverlay()">
+                            <input type="text" id="fatherName" class="w-full p-1 text-xs border rounded focus:border-blue-500 outline-none" placeholder="Father" oninput="window.updateMapOverlay()">
+                            <input type="text" id="village" class="w-full p-1 text-xs border rounded focus:border-blue-500 outline-none" placeholder="Village" oninput="window.updateMapOverlay()">
+                            <input type="text" id="mandal" class="w-full p-1 text-xs border rounded focus:border-blue-500 outline-none" placeholder="Mandal" oninput="window.updateMapOverlay()">
+                            <input type="text" id="farmerId" class="w-full p-1 text-xs border rounded focus:border-blue-500 outline-none col-span-2" placeholder="Farmer ID" oninput="window.updateMapOverlay()">
+                            
+                            <div class="col-span-2 mt-1 pt-2 border-t border-dashed border-gray-200">
+                                <label class="block text-[10px] font-bold text-orange-600 mb-1 uppercase">Farmer Location</label>
+                                <input type="text" id="farmerLocationInput" class="w-full p-1.5 text-xs border border-orange-200 bg-orange-50 rounded focus:outline-none focus:border-orange-500 font-mono" placeholder="Coords" oninput="window.updateMapOverlay()" onchange="window.processInput()">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-700 mb-1 uppercase">Boundary 1 (Blue)</label>
+                        <textarea id="inputData" class="w-full h-12 p-2 text-xs border border-gray-300 rounded focus:outline-none focus:border-blue-500 resize-none font-mono shadow-inner" placeholder="Coordinates..."></textarea>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-[10px] font-bold text-red-700 mb-1 uppercase">Boundary 2 (Red)</label>
+                        <textarea id="inputData2" class="w-full h-12 p-2 text-xs border border-red-200 bg-red-50 rounded focus:outline-none focus:border-red-500 resize-none font-mono shadow-inner" placeholder="Coordinates..."></textarea>
+                    </div>
+                    
+                    <textarea id="refData" class="hidden"></textarea>
+
+                    <div class="flex gap-2">
+                        <button onclick="window.processInput()" class="flex-1 bg-green-600 hover:bg-green-700 text-white py-1.5 px-4 rounded text-xs font-bold uppercase transition-colors shadow-sm">
+                            <i class="fa-solid fa-rotate mr-1"></i> Refresh Map
+                        </button>
+                        <button onclick="window.clearInput()" class="px-3 py-1.5 text-gray-600 hover:bg-gray-200 bg-gray-100 border border-gray-300 rounded text-xs transition-colors shadow-sm">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                    
+                    <!-- Points List -->
+                    <div class="mt-2 pt-2 border-t border-gray-100">
+                        <h3 class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Points List</h3>
+                        <div id="pointsList" class="space-y-1 max-h-32 overflow-y-auto custom-scrollbar"></div>
+                    </div>
+
+                </div>
+
+                <!-- 2. REFERENCE LAYERS CONTENT -->
+                <div id="content-reference" class="space-y-3 hidden">
+                    <div class="flex gap-2 items-center">
+                        <input type="file" id="refOverlayInput" accept=".gpx,.kml,.kmz" class="hidden" multiple onchange="window.loadReferenceOverlays(this.files)">
+                        <button onclick="document.getElementById('refOverlayInput').click()" class="w-full px-3 py-2 text-xs rounded font-medium bg-gray-600 text-white hover:bg-gray-700 shadow-sm transition-colors flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-plus-circle"></i> Add Reference Files
+                        </button>
+                        <button onclick="window.clearReferenceLayer()" class="px-3 py-2 text-xs rounded font-medium bg-white border border-gray-300 text-gray-600 hover:bg-red-50 hover:text-red-600 shadow-sm transition-colors" title="Clear Overlay">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                    <div id="refLayerStatus" class="text-[10px] text-green-600 hidden font-bold text-center">
+                        <i class="fa-solid fa-check"></i> Layer Loaded
+                    </div>
+                    
+                    <!-- NEW: Default Village Name Input -->
+                    <div class="mt-1">
+                        <label class="text-[10px] text-gray-500 block">Default Village Name (Optional):</label>
+                        <input type="text" id="defaultVillageName" class="w-full p-1 text-xs border border-gray-300 rounded focus:border-blue-500 outline-none" placeholder="Enter if missing in KML">
+                    </div>
+
+                    <div class="pt-2 border-t border-gray-200">
+                        <label class="text-[10px] font-bold text-gray-500 block mb-1">Filter Layers:</label>
+                        <input type="text" id="refFilterInput" oninput="window.filterReferenceLayers(this.value)" class="w-full p-1.5 text-xs border border-gray-300 rounded mb-2 focus:border-blue-500 outline-none" placeholder="Search Survey No, Village, Name...">
+                        
+                        <label class="text-[10px] font-bold text-gray-500 block mb-1">Boundary Style:</label>
+                        <div class="flex gap-2 items-center mb-2">
+                            <button onclick="window.styleReferenceLayers('#FF1493')" class="style-btn w-5 h-5 rounded-full bg-pink-500 border border-gray-300 shadow-sm active" title="Pink"></button>
+                            <button onclick="window.styleReferenceLayers('#FFFF00')" class="style-btn w-5 h-5 rounded-full bg-yellow-400 border border-gray-300 shadow-sm" title="Yellow"></button>
+                            <button onclick="window.styleReferenceLayers('#06b6d4')" class="style-btn w-5 h-5 rounded-full bg-cyan-500 border border-gray-300 shadow-sm" title="Cyan"></button>
+                            <button onclick="window.styleReferenceLayers('#ffffff')" class="style-btn w-5 h-5 rounded-full bg-white border border-gray-300 shadow-sm" title="White"></button>
+                            <div class="w-px h-5 bg-gray-300 mx-1"></div>
+                            <button onclick="window.toggleReferenceLabels()" class="px-2 py-1 text-[10px] border border-gray-300 rounded bg-white hover:bg-gray-50 text-gray-700 transition-colors">Toggle</button>
+                        </div>
+                        
+                        <label class="text-[10px] font-bold text-gray-500 block mb-1 border-t border-gray-100 pt-1">Village Name (Top):</label>
+                        <div class="flex gap-2 items-center mb-2">
+                            <input type="color" id="villageColorPicker" value="#4ade80" onchange="window.updateLabelStyles()" class="w-8 h-6 p-0 border border-gray-300 rounded cursor-pointer">
+                            <input type="number" id="villageSizeInput" value="14" min="8" max="32" onchange="window.updateLabelStyles()" class="w-12 p-1 text-xs border border-gray-300 rounded"> <span class="text-xs">px</span>
+                        </div>
+                        
+                        <label class="text-[10px] font-bold text-gray-500 block mb-1">Survey No (Bottom):</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="color" id="surveyColorPicker" value="#facc15" onchange="window.updateLabelStyles()" class="w-8 h-6 p-0 border border-gray-300 rounded cursor-pointer">
+                             <input type="number" id="surveySizeInput" value="18" min="10" max="48" onchange="window.updateLabelStyles()" class="w-12 p-1 text-xs border border-gray-300 rounded"> <span class="text-xs">px</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. TERRAIN ANALYSIS CONTENT -->
+                <div id="content-terrain" class="space-y-3 hidden">
+                    <div class="flex gap-2 mb-2">
+                        <button onclick="window.analyzeTerrain()" id="terrainBtn" class="flex-1 text-xs bg-gray-700 text-white px-3 py-2 rounded hover:bg-gray-900 transition-colors flex items-center justify-center gap-1">
+                            ⛰️ Analyze Slope
+                        </button>
+                        <button onclick="window.generateContours()" id="contourBtn" class="flex-1 text-xs bg-orange-600 text-white px-3 py-2 rounded hover:bg-orange-700 transition-colors flex items-center justify-center gap-1">
+                            〰️ Show Contours
+                        </button>
+                    </div>
+                    
+                    <button onclick="window.clearTerrainAnalysis()" class="w-full text-xs bg-white border border-red-300 text-red-600 px-3 py-1 rounded hover:bg-red-50 transition-colors flex items-center justify-center gap-1 mb-2">
+                        <i class="fa-solid fa-xmark"></i> Clear Analysis
+                    </button>
+
+                    <div id="terrainStats" class="hidden text-xs text-gray-700 bg-gray-100 p-2 rounded border border-gray-200">
+                        <div class="flex justify-between border-b border-gray-200 pb-1 mb-1">
+                            <span class="text-gray-500">Max Elevation:</span> 
+                            <span id="maxElev" class="font-mono font-bold">-</span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-200 pb-1 mb-1">
+                            <span class="text-gray-500">Min Elevation:</span> 
+                            <span id="minElev" class="font-mono font-bold">-</span>
+                        </div>
+                        <div class="flex justify-between font-bold text-blue-700">
+                            <span>Avg Slope:</span> 
+                            <span id="avgSlope">-</span>
+                        </div>
+                        <!-- Subline info injected here -->
+                        <div id="sublineStat" class="hidden flex justify-between font-bold text-purple-700 mt-1 pt-1 border-t border-gray-300">
+                            <span>Sublines:</span> <span id="sublineVal">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. CLOUD STORAGE CONTENT -->
+                <div id="content-cloud" class="space-y-3 hidden">
+                    <div class="p-3 bg-indigo-50 rounded border border-indigo-100 text-center">
+                        <p class="text-xs text-indigo-800 mb-2 font-medium">Save current progress or load previous surveys.</p>
+                        <div class="flex gap-2 justify-center">
+                            <button onclick="window.saveSurveyToCloud()" class="bg-indigo-600 hover:bg-indigo-700 text-white py-1.5 px-4 rounded text-xs font-medium shadow-sm transition-colors">
+                                <i class="fa-solid fa-cloud-arrow-up mr-1"></i> Save
+                            </button>
+                            <button onclick="window.openCloudLoadModal()" class="bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 py-1.5 px-4 rounded text-xs font-medium shadow-sm transition-colors">
+                                <i class="fa-solid fa-cloud-arrow-down mr-1"></i> Load
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 5. EXPORT FORMATS CONTENT -->
+                <div id="content-export" class="space-y-3 hidden">
+                     <div class="flex justify-between items-center mb-2">
+                        <button onclick="window.generateImageReport()" class="flex-1 mr-2 px-3 py-2 bg-purple-600 border border-purple-700 rounded text-[10px] text-white font-bold hover:bg-purple-700 flex items-center justify-center gap-1 shadow-sm transition-all transform hover:scale-105" title="Generate Image for WhatsApp">
+                            <i class="fa-brands fa-whatsapp text-white text-xs"></i> Share Image
+                        </button>
+                        <button onclick="window.generateAIReport()" class="flex-1 ml-2 px-3 py-2 bg-white border border-purple-300 rounded text-[10px] text-purple-700 font-bold hover:bg-purple-50 hover:text-purple-900 flex items-center justify-center gap-1 shadow-sm transition-all transform hover:scale-105">
+                            <i class="fa-solid fa-file-contract"></i> AI Report
+                        </button>
+                    </div>
+                    
+                    <h3 class="text-[10px] font-bold text-gray-400 uppercase border-b border-gray-200 pb-1">GPS Data Files</h3>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="window.downloadGPXLegacy()" class="bg-yellow-600 hover:bg-yellow-700 text-white py-1.5 rounded text-xs font-medium shadow-sm">
+                            GPX Legacy
+                        </button>
+                        <button onclick="window.downloadGPX()" class="bg-green-600 hover:bg-green-700 text-white py-1.5 rounded text-xs font-medium shadow-sm">
+                            GPX v1.1
+                        </button>
+                        <button onclick="window.downloadKML()" class="bg-indigo-600 hover:bg-indigo-700 text-white py-1.5 rounded text-xs font-medium shadow-sm">
+                            Google KML
+                        </button>
+                        <button onclick="window.downloadDWG()" class="bg-gray-700 hover:bg-gray-800 text-white py-1.5 rounded text-xs font-medium shadow-sm flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-compass-drafting"></i> AutoCAD DWG
+                        </button>
+                    </div>
+
+                    <div class="mt-4 pt-2 border-t border-gray-300">
+                        <button onclick="window.exportLoginLogs()" class="w-full bg-gray-800 hover:bg-gray-900 text-white py-1.5 rounded text-xs font-medium shadow-sm flex justify-center items-center gap-2 opacity-80 hover:opacity-100 transition-all">
+                            <i class="fa-solid fa-file-excel text-green-400"></i> Admin: Export Logs
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Persistent Stats Overlay (Bottom Left) -->
+        <div id="statsOverlay" class="absolute bottom-4 left-4 z-[400] bg-white/90 backdrop-blur-sm p-3 rounded-lg shadow-lg border border-gray-300 max-w-[200px] text-xs font-medium text-gray-800">
+            <div class="flex justify-between border-b border-gray-300 pb-1 mb-1">
+                <span class="text-blue-600 font-bold">Bound 1:</span>
+                <span id="totalDistanceDisplay">0 m</span>
+            </div>
+            <div class="flex justify-between mb-1">
+                <span>Area 1:</span>
+                <span id="totalAreaDisplay" class="font-bold text-green-700">0 Ac</span>
+            </div>
+            <div class="flex justify-between border-t border-gray-200 pt-1 mt-1">
+                <span class="text-red-600 font-bold">Bound 2:</span>
+                <span id="totalDistanceDisplay2">0 m</span>
+            </div>
+            <div class="flex justify-between">
+                <span>Area 2:</span>
+                <span id="totalAreaDisplay2" class="font-bold text-red-700">0 Ac</span>
+            </div>
+        </div>
+        
+        <!-- Map Controls (Top Right) -->
+        <div id="mapControls" class="absolute top-4 right-4 z-[500] bg-white rounded shadow-md p-1 border border-gray-200 flex flex-col gap-1">
+            <button onclick="window.fitBounds()" class="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-gray-50 rounded" title="Center Map">
+                <i class="fa-solid fa-expand"></i>
+            </button>
+            <div class="border-t border-gray-200 my-0.5"></div>
+            <button id="layerBtn" onclick="window.toggleMapLayer()" class="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-gray-50 rounded flex justify-center items-center" title="Switch Layer (Street)">
+                <i class="fa-solid fa-map"></i>
+            </button>
+        </div>
+        
+        <!-- Layer Toast -->
+        <div id="layerToast">Street Map</div>
+        
+        <!-- Cadastral Button -->
+        <button onclick="window.openOfficialBhuvan()" class="cadastral-btn" title="Open Official Bhuvan Map">
+            <i class="fa-solid fa-map-location"></i> 🇮🇳 Cadastral Map
+        </button>
+
+        <!-- Overlay for Farmer Details -->
+        <div id="mapDetailsOverlay" class="map-details-overlay"></div>
+
+        <!-- Custom Context Menus (Hidden) -->
+        <div id="contextMenu" class="context-menu">
+            <div class="context-menu-item" onclick="window.addPointFromContextMenu('boundary')"> <i class="fa-solid fa-flag text-blue-600"></i> Add Boundary 1 Point </div>
+            <div class="context-menu-item" onclick="window.addPointFromContextMenu('boundary2')"> <i class="fa-solid fa-flag text-red-600"></i> Add Boundary 2 Point </div>
+            <div class="context-menu-item" onclick="window.addPointFromContextMenu('reference')"> <i class="fa-solid fa-map-pin text-green-600"></i> Add Reference Point </div>
+            <div class="border-t border-gray-200 my-1"></div>
+            <div class="context-menu-item" onclick="window.addPointFromContextMenu('borewell')"> <i class="fa-solid fa-faucet-drip text-blue-800"></i> Set Bore Well Here </div>
+            <div class="context-menu-item" onclick="window.addPointFromContextMenu('farmer')"> <i class="fa-solid fa-house-user text-orange-600"></i> Set Farmer Location Here </div>
+        </div>
+
+        <div id="markerContextMenu" class="context-menu">
+            <div class="context-menu-item text-red-600 hover:bg-red-50" onclick="window.deletePointContext()"> <i class="fa-solid fa-trash"></i> Delete Point </div>
+        </div>
+
+    </div>
+
+    <!-- Login Modal Overlay -->
+    <div id="loginOverlay" class="fixed inset-0 z-[3000] bg-blue-900/90 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border-2 border-blue-500/30">
+            <div class="bg-gradient-to-r from-blue-600 to-blue-800 p-6 text-center">
+                <div class="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-3 backdrop-blur-sm border border-white/20">
+                    <i class="fa-solid fa-map-location-dot text-3xl text-white"></i>
+                </div>
+                <h2 class="text-xl font-bold text-white">GPX Manager Login</h2>
+            </div>
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Surveyor Name</label>
+                    <input type="text" id="loginName" class="w-full p-2.5 text-sm border border-gray-300 rounded focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none" placeholder="Enter your full name">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-600 uppercase mb-1">Mobile Number</label>
+                    <input type="tel" id="loginMobile" class="w-full p-2.5 text-sm border border-gray-300 rounded focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none" placeholder="Enter your mobile number">
+                </div>
+                <button id="loginBtn" onclick="window.handleLogin()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded shadow-lg transform transition hover:scale-[1.02] active:scale-100">
+                    Login & Start Survey
+                </button>
+                <p id="loginStatus" class="text-center text-xs text-red-500 h-4"></p>
+            </div>
+            <div class="bg-gray-50 px-6 py-3 border-t border-gray-100 text-center text-[10px] text-gray-400">
+                Secure access for authorized personnel only.
+            </div>
+        </div>
+    </div>
+
+    <!-- Cloud Load Modal -->
+    <div id="cloudLoadModal" class="hidden fixed inset-0 z-[2000] bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="bg-gradient-to-r from-indigo-600 to-blue-700 p-4 flex justify-between items-center text-white">
+                <h3 class="font-bold flex items-center gap-2"> <i class="fa-solid fa-cloud-arrow-down"></i> Saved Surveys </h3>
+                <button onclick="window.toggleCloudLoadModal()" class="hover:text-gray-200"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1">
+                <div id="surveyListContainer" class="space-y-2"> <p class="text-center text-gray-500 text-sm py-8">Loading surveys...</p> </div>
+            </div>
+            <div class="p-4 bg-gray-50 border-t flex justify-end">
+                <button onclick="window.toggleCloudLoadModal()" class="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-200 rounded">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Import Modal -->
+    <div id="aiModal" class="hidden fixed inset-0 z-[2000] bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="bg-gradient-to-r from-purple-600 to-indigo-600 p-4 flex justify-between items-center text-white">
+                <h3 class="font-bold flex items-center gap-2"> <i class="fa-solid fa-robot"></i> AI Smart Import </h3>
+                <button onclick="window.toggleAIModal()" class="hover:text-gray-200"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-4 overflow-y-auto">
+                <p class="text-xs text-gray-500 mb-2">Paste raw text below or upload an image.</p>
+                <div class="mb-3">
+                    <label class="text-xs font-bold text-gray-600 block mb-1">Upload Image:</label>
+                    <input type="file" id="aiImageInput" accept="image/*" class="w-full text-xs text-gray-500"/>
+                </div>
+                <textarea id="aiInputText" class="w-full h-24 p-3 text-sm border border-gray-300 rounded" placeholder="Paste coordinates text..."></textarea>
+                <div id="aiResponseArea" class="hidden bg-purple-50 p-3 rounded border border-purple-100 mb-3">
+                    <div id="aiResponseContent" class="text-xs text-gray-700"></div>
+                </div>
+            </div>
+            <div class="p-4 bg-gray-50 border-t flex justify-end gap-2">
+                <button onclick="window.toggleAIModal()" class="px-4 py-2 text-xs font-medium text-gray-600 hover:bg-gray-200 rounded">Cancel</button>
+                <button id="aiProcessBtn" onclick="window.processAIImport()" class="px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded flex items-center gap-2"> <i class="fa-solid fa-wand-magic-sparkles"></i> Process </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Report Modal -->
+    <div id="reportModal" class="hidden fixed inset-0 z-[2000] bg-black/50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="bg-gradient-to-r from-purple-800 to-indigo-900 p-4 flex justify-between items-center text-white">
+                <h3 class="font-bold flex items-center gap-2"> <i class="fa-solid fa-file-signature"></i> Survey Report </h3>
+                <div class="flex gap-2">
+                    <button id="ttsBtn" onclick="window.readReportAloud()" class="bg-purple-600 hover:bg-purple-500 px-3 py-1 rounded text-xs flex items-center gap-1 transition-colors"> <i class="fa-solid fa-volume-high"></i> Listen </button>
+                    <button onclick="window.toggleReportModal()" class="hover:text-gray-200"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+            <div id="reportContent" class="p-6 overflow-y-auto prose prose-sm max-w-none text-gray-700"></div>
+            <div class="p-4 bg-gray-50 border-t flex justify-end">
+                <button onclick="window.toggleReportModal()" class="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-200 rounded">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Report Container for Image Gen -->
+    <div id="report-generator-container" class="fixed top-0 left-0 -z-50 opacity-0 pointer-events-none w-[750px] bg-white p-6 font-sans border border-gray-300" style="left: -10000px; top: 0;"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+        import { getFirestore, collection, addDoc, getDocs, doc, deleteDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+
+        // --- Configuration ---
+        let firebaseConfig;
+        try {
+            firebaseConfig = (typeof __firebase_config !== 'undefined') ? JSON.parse(__firebase_config) : null;
+        } catch (e) { console.error("Config parse error", e); }
+        
+        const appId = (typeof __app_id !== 'undefined') ? __app_id : 'default-app';
+        let app, auth, db;
+        let firebaseAvailable = false;
+
+        if (firebaseConfig) {
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+                firebaseAvailable = true;
+            } catch (e) {
+                console.error("Firebase init failed", e);
+            }
+        }
+        
+        const apiKey = "";
+        const defaultApiKey = "";
+
+        // Global State
+        let map;
+        let tileLayer;
+        let currentLayerIndex = 0;
+        let markers = [];
+        let boundaryPoints = [];
+        let boundaryPoints2 = [];
+        let referencePoints = [];
+        
+        let referenceLayerGroup = null;
+        let referenceFeatures = []; 
+        let slopeLayerGroup = null; 
+        let contourLayerGroup = null; 
+        
+        let boreWellData = null;
+        let farmerLocationData = null; 
+        let distanceLabels = [];
+        let distanceLabels2 = [];
+        let polyline = null;
+        let polyline2 = null;
+        let contextMenuLatLng = null;
+        let selectedPoint = null;
+        let calculatedAreaStr = "0 Sq M";
+        let calculatedAreaStr2 = "0 Sq M";
+        let currentUserProfile = null;
+        let audioContext = null;
+        let userApiKey = ""; 
+        const WATERMARK_TEXT = "GPX Waypoint Manager";
+
+        // Helpers Defined Before Usage
+        function getEffectiveApiKey() {
+            if (userApiKey && userApiKey.trim() !== "") return userApiKey;
+            return defaultApiKey;
+        }
+
+        function decimalToDM(decimal, isLat) {
+            const dir = isLat ? (decimal >= 0 ? 'N' : 'S') : (decimal >= 0 ? 'E' : 'W');
+            const abs = Math.abs(decimal);
+            const deg = Math.floor(abs);
+            const min = (abs - deg) * 60;
+            return `${dir} ${deg} ${min.toFixed(8)}`;
+        }
+
+        function parseDM(coordStr) {
+            try {
+                if (!coordStr) return null;
+                coordStr = coordStr.trim();
+                if (/^-?[\d\.]+$/.test(coordStr)) return isNaN(parseFloat(coordStr)) ? null : parseFloat(coordStr);
+                const parts = coordStr.split(/\s+/);
+                if (parts.length < 3) return null;
+                const dir = parts[0].toUpperCase();
+                let val = parseFloat(parts[1]) + (parseFloat(parts[2]) / 60);
+                if (dir === 'S' || dir === 'W') val *= -1;
+                return val;
+            } catch (e) { return null; }
+        }
+
+        function formatDistance(m) {
+            return m < 1000 ? Math.round(m) + " m" : (m / 1000).toFixed(2) + " km";
+        }
+
+        function calculateArea(points) {
+            if (points.length < 3) return "0 Sq M";
+            const centerLat = points[0].lat;
+            const R = 6378137;
+            const degToRad = Math.PI / 180;
+            const x = [], y = [];
+            for(let i=0; i<points.length; i++) {
+                x.push(points[i].lon * degToRad * R * Math.cos(centerLat * degToRad));
+                y.push(points[i].lat * degToRad * R);
+            }
+            let area = 0;
+            for (let i = 0; i < points.length; i++) {
+                const j = (i + 1) % points.length;
+                area += x[i] * y[j];
+                area -= x[j] * y[i];
+            }
+            area = Math.abs(area) / 2;
+            const acres = (area / 4046.86).toFixed(2);
+            const hectares = (area / 10000).toFixed(2);
+            return `${Math.round(area)} sq m (${acres} Acres / ${hectares} Ha)`;
+        }
+
+        function getFarmerDetailsHtml() {
+            const farmerName = document.getElementById('farmerName').value;
+            const fatherName = document.getElementById('fatherName').value;
+            const village = document.getElementById('village').value;
+            const mandal = document.getElementById('mandal').value;
+            const farmerId = document.getElementById('farmerId').value;
+            if(!farmerName && !fatherName && !village && !farmerId) return "";
+            let html = `<b>Farmer:</b> ${farmerName}<br><b>Father:</b> ${fatherName}<br><b>Village:</b> ${village}<br><b>Mandal:</b> ${mandal}<br>`;
+            html += `<b>ID:</b> ${farmerId}`;
+            return html;
+        }
+
+        function getExtendedBoreWellName() { return "B/W " + boreWellData.name; }
+        function getExtendedFarmerLocationName() {
+            const fName = document.getElementById('farmerName').value.trim() || "Farmer";
+            const village = document.getElementById('village').value.trim();
+            const mandal = document.getElementById('mandal').value.trim();
+            const fid = document.getElementById('farmerId').value.trim();
+            let name = fName;
+            if (village) name += ` - ${village}`;
+            if (mandal) name += ` - ${mandal}`;
+            if (fid) name += ` (ID: ${fid})`;
+            return name;
+        }
+        function getExtendedProjectName() {
+            const fName = document.getElementById('farmerName').value.trim();
+            const village = document.getElementById('village').value.trim();
+            const fid = document.getElementById('farmerId').value.trim();
+            if (fName) {
+                let proj = `Project - ${fName}`;
+                if (village) proj += ` - ${village}`;
+                if (fid) proj += ` (${fid})`;
+                return proj;
+            }
+            return "Project Data";
+        }
+        
+        function isPointInPoly(pt, poly) {
+            var x = pt.lon, y = pt.lat;
+            var inside = false;
+            for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                var xi = poly[i].lon, yi = poly[i].lat;
+                var xj = poly[j].lon, yj = poly[j].lat;
+                var intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+        
+        function readFileAsText(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = (e) => resolve(e.target.result); reader.onerror = reject; reader.readAsText(file); }); }
+        
+        // Define these BEFORE they are used in window functions
+        function mergeData(data) { 
+            data.references.forEach(p => { 
+                if (p.name && p.name.toLowerCase().includes("bore")) document.getElementById('boreWellInput').value = `${decimalToDM(p.lat, true)}, ${decimalToDM(p.lon, false)}`; 
+            }); 
+            if (data.boundaries.length > 0) { 
+                const str = data.boundaries.map(p => `${decimalToDM(p.lat, true)},${decimalToDM(p.lon, false)}`).join('|'); 
+                const area = document.getElementById('inputData'); 
+                area.value += (area.value.trim() ? '|' : '') + str; 
+            } 
+            if (data.references.length > 0) { 
+                const refs = data.references.filter(p => !p.name || !p.name.toLowerCase().includes("bore")).map(p => `${decimalToDM(p.lat, true)},${decimalToDM(p.lon, false)}`).join('|'); 
+                const area = document.getElementById('refData'); 
+                area.value += (area.value.trim() ? '|' : '') + refs; 
+            } 
+        }
+
+        function parseGPX(xmlStr) { 
+            const parser = new DOMParser(); 
+            const xmlDoc = parser.parseFromString(xmlStr, "text/xml"); 
+            const boundaries = []; 
+            const references = []; 
+            const tracks = [...xmlDoc.getElementsByTagName('trkpt'), ...xmlDoc.getElementsByTagName('rtept')]; 
+            tracks.forEach(el => { 
+                let lat = parseFloat(el.getAttribute('lat')), lon = parseFloat(el.getAttribute('lon')); 
+                if (!isNaN(lat) && !isNaN(lon)) boundaries.push({lat, lon}); 
+            }); 
+            const wpts = xmlDoc.getElementsByTagName('wpt'); 
+            for (let i=0; i<wpts.length; i++) { 
+                let lat = parseFloat(wpts[i].getAttribute('lat')), lon = parseFloat(wpts[i].getAttribute('lon')); 
+                let name = wpts[i].getElementsByTagName('name')[0]?.textContent || ''; 
+                if (!isNaN(lat) && !isNaN(lon)) references.push({lat, lon, name}); 
+            } 
+            return { boundaries, references }; 
+        }
+
+        function parseKML(xmlStr) { 
+            const parser = new DOMParser(); 
+            const xmlDoc = parser.parseFromString(xmlStr, "text/xml"); 
+            const boundaries = []; 
+            const references = []; 
+            const placemarks = xmlDoc.getElementsByTagName('Placemark'); 
+            for (let i = 0; i < placemarks.length; i++) { 
+                const pm = placemarks[i]; 
+                const name = pm.getElementsByTagName('name')[0]?.textContent || ''; 
+                const line = pm.getElementsByTagName('LineString')[0]; 
+                const poly = pm.getElementsByTagName('Polygon')[0]; 
+                const point = pm.getElementsByTagName('Point')[0]; 
+                if (line || poly) { 
+                    const coords = (line || poly).getElementsByTagName('coordinates')[0].textContent.trim().split(/\s+/); 
+                    coords.forEach(c => { 
+                        const parts = c.split(','); 
+                        if (parts.length >= 2) boundaries.push({lon: parseFloat(parts[0]), lat: parseFloat(parts[1])}); 
+                    }); 
+                } else if (point) { 
+                    const parts = point.getElementsByTagName('coordinates')[0].textContent.trim().split(','); 
+                    if (parts.length >= 2) references.push({lon: parseFloat(parts[0]), lat: parseFloat(parts[1]), name}); 
+                } 
+            } 
+            return { boundaries, references }; 
+        }
+
+        async function handleKMZ(file) { 
+            const zip = await JSZip.loadAsync(file); 
+            const kmlFile = Object.keys(zip.files).find(name => name.toLowerCase().endsWith('.kml')); 
+            if (kmlFile) { 
+                const content = await zip.file(kmlFile).async("string"); 
+                // Now parseKML is defined
+                mergeData(parseKML(content)); 
+            } 
+        }
+        
+        // --- IMPORTANT: Define validateExport first as it's a dependency ---
+        function validateExport() { 
+            if (!boreWellData) { alert("Error: Bore Well Point is mandatory!"); return false; } 
+            if (boundaryPoints.length === 0 && boundaryPoints2.length === 0 && referencePoints.length === 0 && !farmerLocationData) { alert("No points to export!"); return false; } 
+            return true; 
+        }
+
+        function downloadFile(content, name, type) { 
+            const a = document.createElement('a'); 
+            a.href = URL.createObjectURL(new Blob([content], { type })); 
+            a.download = name; 
+            document.body.appendChild(a); 
+            a.click(); 
+            document.body.removeChild(a); 
+        };
+
+        // --- NEW: Nav Tab Logic ---
+        window.switchTab = function(tabName) {
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+
+            const contentDivs = document.querySelectorAll('#panelContent > div');
+            contentDivs.forEach(div => div.classList.add('hidden'));
+
+            const target = document.getElementById(`content-${tabName}`);
+            if (target) {
+                target.classList.remove('hidden');
+                const titles = {
+                    'input': 'Input Data',
+                    'reference': 'Reference Layers',
+                    'terrain': 'Terrain Analysis',
+                    'cloud': 'Cloud Storage',
+                    'export': 'Export Formats'
+                };
+                document.getElementById('panelTitle').innerText = titles[tabName];
+            }
+
+            const panel = document.getElementById('floatingPanel');
+            panel.classList.remove('panel-hidden');
+            
+            setTimeout(() => { map.invalidateSize(); }, 300);
+        };
+
+        window.closePanel = function() {
+            document.getElementById('floatingPanel').classList.add('panel-hidden');
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+            setTimeout(() => { map.invalidateSize(); }, 300);
+        };
+
+        // --- Core Functions ---
+        async function authenticateUser() {
+            if (!auth) return null;
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+            return auth.currentUser;
+        }
+
+        function updateHeaderUserInfo() {
+            if(currentUserProfile) {
+                const nameEl = document.getElementById('loggedInName');
+                if(nameEl) nameEl.innerText = currentUserProfile.name;
+                const displayEl = document.getElementById('userInfoDisplay');
+                if(displayEl) displayEl.classList.remove('hidden');
+            }
+        }
+
+        // --- Exposed Functions to Window ---
+        window.checkLoginStatus = function() {
+            const overlay = document.getElementById('loginOverlay');
+            if (!overlay) { console.warn("Login overlay not found in DOM"); return; }
+            const stored = localStorage.getItem('gpx_user_profile');
+            const storedKey = localStorage.getItem('gpx_user_api_key');
+            if (storedKey) userApiKey = storedKey;
+            if(stored) {
+                currentUserProfile = JSON.parse(stored);
+                overlay.style.display = 'none';
+                updateHeaderUserInfo();
+            } else {
+                overlay.style.display = 'flex';
+            }
+        };
+
+        window.handleLogin = async function() {
+            const name = document.getElementById('loginName').value.trim();
+            const mobile = document.getElementById('loginMobile').value.trim();
+            const btn = document.getElementById('loginBtn');
+            const status = document.getElementById('loginStatus');
+            if (!name || !mobile) { status.innerText = "Please enter both Name and Mobile Number."; return; }
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Logging in...';
+            btn.disabled = true;
+            try {
+                let uid = 'offline-user';
+                if (firebaseAvailable) {
+                    try {
+                        const user = await authenticateUser();
+                        if (user) uid = user.uid;
+                    } catch (authErr) { console.warn("Auth failed, offline mode."); }
+                }
+                currentUserProfile = { name: name, mobile: mobile, uid: uid, loginTime: new Date().toISOString() };
+                localStorage.setItem('gpx_user_profile', JSON.stringify(currentUserProfile));
+                if (firebaseAvailable && uid !== 'offline-user') {
+                    try {
+                        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'login_logs'), {
+                            name: name, mobile: mobile, uid: uid, timestamp: new Date().toISOString()
+                        });
+                    } catch (logErr) { console.warn("Cloud logging failed, continuing.", logErr); }
+                }
+                document.getElementById('loginOverlay').style.display = 'none';
+                updateHeaderUserInfo();
+            } catch (error) {
+                console.error("Login Process Error:", error);
+                document.getElementById('loginOverlay').style.display = 'none';
+            }
+        };
+        
+        window.addPointFromContextMenu = function(type) {
+            if (!contextMenuLatLng) return;
+            const lat = contextMenuLatLng.lat;
+            const lng = contextMenuLatLng.lng;
+            const coordStr = `${decimalToDM(lat, true)}, ${decimalToDM(lng, false)}`;
+            if (type === 'borewell') document.getElementById('boreWellInput').value = coordStr;
+            else if (type === 'farmer') document.getElementById('farmerLocationInput').value = coordStr;
+            else if (type === 'boundary2') {
+                const field = document.getElementById('inputData2');
+                field.value += (field.value.trim() ? '|' : '') + coordStr;
+            } else {
+                const id = type === 'boundary' ? 'inputData' : 'refData';
+                const field = document.getElementById(id);
+                field.value += (field.value.trim() ? '|' : '') + coordStr;
+            }
+            window.processInput();
+            document.getElementById('contextMenu').style.display = 'none';
+        };
+        window.deletePointContext = function() {
+            if (selectedPoint) window.deletePointDirect(selectedPoint.type, selectedPoint.index);
+            document.getElementById('markerContextMenu').style.display = 'none';
+        };
+        window.updatePointData = function(type, index, lat, lng) { 
+            let id = type === 'boundary' ? 'inputData' : 'refData'; 
+            if(type === 'boundary2') id = 'inputData2'; 
+            const field = document.getElementById(id); 
+            let parts = field.value.split('|'); 
+            const newStr = `${decimalToDM(lat, true)}, ${decimalToDM(lng, false)}`; 
+            if (index >= 0 && index < parts.length) { parts[index] = newStr; field.value = parts.join('|'); window.processInput(); } 
+        };
+        window.deletePointDirect = function(type, index) { 
+            let id = type === 'boundary' ? 'inputData' : 'refData'; 
+            if(type === 'boundary2') id = 'inputData2'; 
+            const field = document.getElementById(id); 
+            const parts = field.value.split('|'); 
+            if (index >= 0 && index < parts.length) { parts.splice(index, 1); field.value = parts.join('|'); window.processInput(); } 
+        };
+        window.clearInput = function() { 
+            document.getElementById('inputData').value = ''; document.getElementById('inputData2').value = ''; document.getElementById('refData').value = ''; 
+            document.getElementById('boreWellInput').value = ''; document.getElementById('farmerName').value = ''; document.getElementById('fatherName').value = ''; 
+            document.getElementById('village').value = ''; document.getElementById('mandal').value = ''; document.getElementById('farmerId').value = ''; 
+            document.getElementById('farmerLocationInput').value = ''; window.processInput(); 
+        };
+        window.updateMapOverlay = function() { 
+            const overlay = document.getElementById('mapDetailsOverlay'); 
+            const farmerName = document.getElementById('farmerName').value; const fatherName = document.getElementById('fatherName').value; 
+            const village = document.getElementById('village').value; const mandal = document.getElementById('mandal').value; 
+            const boreWellCoord = document.getElementById('boreWellInput').value; 
+            let html = ''; 
+            if(farmerName) html += `<p>${farmerName}</p>`; if(fatherName) html += `<p>${fatherName}</p>`; 
+            if(village || mandal) html += `<p>${village ? village : ''} ${village && mandal ? ',' : ''} ${mandal ? mandal : ''}</p>`; 
+            if(boreWellCoord) { 
+                html += `<p><span class="coord-text mt-1 block">${boreWellCoord}</span></p>`; 
+                const c = boreWellCoord.split(','); 
+                if (c.length === 2) { 
+                    const lat = parseDM(c[0]); const lon = parseDM(c[1]); 
+                    if (lat && lon) html += `<p class="text-xs font-bold text-gray-500 font-mono bg-white/60 inline-block px-1 rounded border border-gray-200">Name: ${lat.toFixed(6)}, ${lon.toFixed(6)}</p>`; 
+                } 
+            } 
+            if(calculatedAreaStr && calculatedAreaStr !== "0 Sq M") html += `<p class="text-green-800">Area = ${calculatedAreaStr.split('(')[1].replace(')', '')}</p>`; 
+            overlay.innerHTML = html; 
+        };
+        window.processInput = function() {
+            const boundInput = document.getElementById('inputData').value; const boundInput2 = document.getElementById('inputData2').value;
+            const refInput = document.getElementById('refData').value; const boreWellInput = document.getElementById('boreWellInput').value;
+            const farmerLocInput = document.getElementById('farmerLocationInput').value;
+
+            markers.forEach(m => map.removeLayer(m)); markers = []; distanceLabels.forEach(l => map.removeLayer(l)); distanceLabels = [];
+            if (polyline) map.removeLayer(polyline); if (polyline2) map.removeLayer(polyline2);
+            if (slopeLayerGroup) map.removeLayer(slopeLayerGroup); if (contourLayerGroup) map.removeLayer(contourLayerGroup);
+
+            document.getElementById('pointsList').innerHTML = ''; boundaryPoints = []; boundaryPoints2 = []; referencePoints = []; boreWellData = null; farmerLocationData = null;
+
+            if (boreWellInput && boreWellInput.trim()) {
+                const c = boreWellInput.split(',');
+                if (c.length === 2) {
+                    const lat = parseDM(c[0]), lon = parseDM(c[1]);
+                    if (lat && lon) {
+                        boreWellData = { lat, lon, name: boreWellInput.trim() };
+                        const icon = L.divIcon({ className: 'borewell-icon', html: '<i class="fa-solid fa-faucet-drip"></i>', iconSize: [24, 24], iconAnchor: [12, 12] });
+                        const marker = L.marker([lat, lon], {icon: icon, draggable: true}).addTo(map);
+                        marker.on('dragend', (e) => { const pt = e.target.getLatLng(); document.getElementById('boreWellInput').value = `${decimalToDM(pt.lat, true)}, ${decimalToDM(pt.lng, false)}`; window.updateMapOverlay(); window.processInput(); });
+                        marker.bindPopup(`<b>Bore Well</b><br>${getFarmerDetailsHtml()}`); markers.push(marker);
+                    }
+                }
+            }
+            if (farmerLocInput && farmerLocInput.trim()) {
+                const c = farmerLocInput.split(',');
+                if (c.length === 2) {
+                    const lat = parseDM(c[0]), lon = parseDM(c[1]);
+                    if (lat && lon) {
+                        farmerLocationData = { lat, lon, name: farmerLocInput.trim() };
+                        const icon = L.divIcon({ className: 'farmer-icon', html: '<i class="fa-solid fa-house-user"></i>', iconSize: [24, 24], iconAnchor: [12, 12] });
+                        const marker = L.marker([lat, lon], {icon: icon, draggable: true}).addTo(map);
+                        marker.on('dragend', (e) => { const pt = e.target.getLatLng(); document.getElementById('farmerLocationInput').value = `${decimalToDM(pt.lat, true)}, ${decimalToDM(pt.lng, false)}`; window.updateMapOverlay(); window.processInput(); });
+                        marker.bindPopup(`<b>${document.getElementById('farmerName').value || 'Farmer'}'s Location</b>`); markers.push(marker);
+                    }
+                }
+            }
+            if (refInput.trim()) refInput.split('|').forEach((str, i) => { const c = str.split(','); if (c.length === 2) { const lat = parseDM(c[0]), lon = parseDM(c[1]); if (lat && lon) { referencePoints.push({ lat, lon, name: str.trim() }); window.addMarker(lat, lon, `Ref ${i+1}`, "green", "map-pin", str.trim(), 0, 'reference', i); } } });
+
+            let latLngs = [], totalDist = 0;
+            if (boundInput.trim()) boundInput.split('|').forEach((str, i) => { const c = str.split(','); if (c.length === 2) { const lat = parseDM(c[0]), lon = parseDM(c[1]); if (lat && lon) { let dist = 0; if (latLngs.length > 0) { dist = map.distance(latLngs[latLngs.length-1], [lat, lon]); totalDist += dist; const mid = [(latLngs[latLngs.length-1][0]+lat)/2, (latLngs[latLngs.length-1][1]+lon)/2]; const lbl = L.marker(mid, { icon: L.divIcon({ className: 'map-distance-label', html: formatDistance(dist), iconSize: null }), interactive: false }).addTo(map); distanceLabels.push(lbl); } latLngs.push([lat, lon]); boundaryPoints.push({ lat, lon, name: str.trim(), dist }); window.addMarker(lat, lon, `BP ${i+1}`, "blue", "flag", str.trim(), dist, 'boundary', i); } } });
+            document.getElementById('totalDistanceDisplay').innerText = formatDistance(totalDist); calculatedAreaStr = calculateArea(boundaryPoints); document.getElementById('totalAreaDisplay').innerText = calculatedAreaStr;
+
+            let latLngs2 = [], totalDist2 = 0;
+            if (boundInput2.trim()) boundInput2.split('|').forEach((str, i) => { const c = str.split(','); if (c.length === 2) { const lat = parseDM(c[0]), lon = parseDM(c[1]); if (lat && lon) { let dist = 0; if (latLngs2.length > 0) { dist = map.distance(latLngs2[latLngs2.length-1], [lat, lon]); totalDist2 += dist; const mid = [(latLngs2[latLngs2.length-1][0]+lat)/2, (latLngs2[latLngs2.length-1][1]+lon)/2]; const lbl = L.marker(mid, { icon: L.divIcon({ className: 'map-distance-label', html: formatDistance(dist), iconSize: null }), interactive: false }).addTo(map); distanceLabels.push(lbl); } latLngs2.push([lat, lon]); boundaryPoints2.push({ lat, lon, name: str.trim(), dist }); window.addMarker(lat, lon, `BP2 ${i+1}`, "red", "flag", str.trim(), dist, 'boundary2', i); } } });
+            document.getElementById('totalDistanceDisplay2').innerText = formatDistance(totalDist2); calculatedAreaStr2 = calculateArea(boundaryPoints2); document.getElementById('totalAreaDisplay2').innerText = calculatedAreaStr2;
+
+            window.updateMapOverlay();
+            if (latLngs.length > 1) polyline = L.polygon(latLngs, {color: 'blue', fillOpacity: 0.1, weight: 2}).addTo(map);
+            if (latLngs2.length > 1) polyline2 = L.polygon(latLngs2, {color: 'red', fillOpacity: 0.1, weight: 2}).addTo(map);
+            if(latLngs.length > 0 || latLngs2.length > 0 || boreWellData) { if (latLngs.length > 1) map.fitBounds(polyline.getBounds(), {padding: [50, 50]}); else if (latLngs2.length > 1) map.fitBounds(polyline2.getBounds(), {padding: [50, 50]}); else if (latLngs.length === 1) map.setView(latLngs[0], 16); else if (boreWellData) map.setView([boreWellData.lat, boreWellData.lon], 16); }
+        };
+        window.addMarker = function(lat, lon, label, color, icon, desc, dist=0, type=null, index=null) { const marker = L.marker([lat, lon], { draggable: true }).addTo(map); markers.push(marker); if (type !== null && index !== null) { marker.on('dragend', function(e) { const pt = e.target.getLatLng(); window.updatePointData(type, index, pt.lat, pt.lng); }); marker.on('contextmenu', (e) => { L.DomEvent.stopPropagation(e); selectedPoint = { type, index }; document.getElementById('markerContextMenu').style.display = 'block'; document.getElementById('markerContextMenu').style.left = e.containerPoint.x + 'px'; document.getElementById('markerContextMenu').style.top = e.containerPoint.y + 'px'; document.getElementById('contextMenu').style.display = 'none'; }); } let content = `<div class="text-center"><b class="text-${color}-600">${label}</b>`; if(dist > 0) content += `<br>Dist: ${formatDistance(dist)}`; if(desc) content += `<div class="text-xs bg-gray-100 mt-1 p-1">${desc}</div>`; content += `</div>`; marker.bindPopup(content); const list = document.getElementById('pointsList'); const div = document.createElement('div'); div.className = `p-2 rounded border border-${color}-200 bg-${color}-50 text-xs cursor-pointer hover:bg-${color}-100 flex justify-between items-center group`; const left = document.createElement('div'); left.className = "flex items-center gap-2"; left.innerHTML = `<i class="fa-solid fa-${icon} text-${color}-500"></i><span>${label}</span>`; div.appendChild(left); if (type !== null && index !== null) { const btn = document.createElement('button'); btn.className = "text-gray-400 hover:text-red-600 p-1 rounded hover:bg-white transition-colors opacity-60 group-hover:opacity-100"; btn.innerHTML = `<i class="fa-solid fa-xmark"></i>`; btn.title = "Remove Point"; btn.onclick = (e) => { e.stopPropagation(); window.deletePointDirect(type, index); }; div.appendChild(btn); } div.onclick = () => { map.setView([lat, lon], 18); marker.openPopup(); }; list.appendChild(div); };
+        window.initMap = function() { map = L.map('map', { zoomControl: false, maxZoom: 22 }).setView([14.811, 76.950], 15); L.control.zoom({ position: 'bottomright' }).addTo(map); window.setMapLayer(); map.on('contextmenu', function(e) { contextMenuLatLng = e.latlng; const menu = document.getElementById('contextMenu'); menu.style.display = 'block'; menu.style.left = e.containerPoint.x + 'px'; menu.style.top = e.containerPoint.y + 'px'; document.getElementById('markerContextMenu').style.display = 'none'; }); const hideMenus = () => { document.getElementById('contextMenu').style.display = 'none'; document.getElementById('markerContextMenu').style.display = 'none'; }; map.on('click', hideMenus); map.on('movestart', hideMenus); if (document.readyState === 'complete') { window.processInput(); window.checkLoginStatus(); window.switchTab('input'); } else { window.addEventListener('load', () => { window.processInput(); window.checkLoginStatus(); window.switchTab('input'); }); } };
+        window.setMapLayer = function() { if (tileLayer) map.removeLayer(tileLayer); const toast = document.getElementById('layerToast'); const btn = document.getElementById('layerBtn'); let layerName = ""; let iconClass = ""; if (currentLayerIndex === 0) { tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM', maxZoom: 19, crossOrigin: 'anonymous' }).addTo(map); layerName = "Street Map"; iconClass = "fa-map"; } else if (currentLayerIndex === 1) { tileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles © Esri', maxZoom: 19, crossOrigin: 'anonymous' }).addTo(map); layerName = "Global Satellite"; iconClass = "fa-satellite"; } else if (currentLayerIndex === 2) { tileLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', { attribution: 'Google Hybrid', maxZoom: 22, crossOrigin: 'anonymous' }).addTo(map); layerName = "Google Hybrid"; iconClass = "fa-layer-group"; } else if (currentLayerIndex === 3) { tileLayer = L.tileLayer.wms('https://bhuvan-vec1.nrsc.gov.in/bhuvan/gwc/service/wms/', { layers: 'india3', format: 'image/jpeg', transparent: false, attribution: 'ISRO Bhuvan', maxZoom: 19, crossOrigin: 'anonymous' }).addTo(map); layerName = "ISRO Bhuvan (Satellite)"; iconClass = "fa-globe"; } else { tileLayer = L.tileLayer.wms('https://bhuvan-vec1.nrsc.gov.in/bhuvan/gwc/service/wms/', { layers: 'bhuvan_2d', format: 'image/jpeg', transparent: false, attribution: 'ISRO Bhuvan 2D', maxZoom: 19, crossOrigin: 'anonymous' }).addTo(map); layerName = "ISRO Bhuvan (Cadastral/2D)"; iconClass = "fa-map-location"; } btn.innerHTML = `<i class="fa-solid ${iconClass}"></i>`; btn.title = `Switch Layer (Current: ${layerName})`; toast.innerText = layerName; toast.style.opacity = "1"; setTimeout(() => { toast.style.opacity = "0"; }, 2000); };
+        window.toggleMapLayer = function() { currentLayerIndex = (currentLayerIndex + 1) % 5; window.setMapLayer(); };
+        window.openOfficialBhuvan = function() { const center = map.getCenter(); const lat = center.lat.toFixed(6); const lng = center.lng.toFixed(6); const coords = `${lat}, ${lng}`; const textArea = document.createElement("textarea"); textArea.value = coords; textArea.style.position = "fixed"; textArea.style.opacity = "0"; document.body.appendChild(textArea); textArea.select(); try { document.execCommand("copy"); } catch (err) { console.error(err); } finally { document.body.removeChild(textArea); } alert(`Coordinates Copied: ${coords}\n\n1. The Bhuvan Map will open in a new tab.\n2. PASTE these coordinates into the Bhuvan Search box to find your location.\n3. Select "Cadastral" from the Bhuvan layers menu.`); window.open("https://bhuvan-app1.nrsc.gov.in/bhuvan2d/bhuvan/bhuvan2d.php", '_blank'); };
+        window.handleFileUpload = async function(input) { const files = input.files; if (!files.length) return; if (document.getElementById('inputData').value || document.getElementById('refData').value || document.getElementById('boreWellInput').value) { if (confirm("Clear existing data?")) window.clearInput(); } for (let i = 0; i < files.length; i++) { const file = files[i]; const fileName = file.name.toLowerCase(); try { if (fileName.endsWith('.kmz')) { await handleKMZ(file); } else if (fileName.endsWith('.kml') || fileName.endsWith('.gpx') || fileName.endsWith('.xml')) { const text = await readFileAsText(file); const parsed = fileName.endsWith('.gpx') ? parseGPX(text) : parseKML(text); mergeData(parsed); } } catch (e) { console.error(e); } } window.processInput(); input.value = ''; };
+        
+        // --- RESTORED FUNCTIONS ---
+        
+        // GPX Legacy
+        window.downloadGPXLegacy = function() { 
+            if (!validateExport()) return; 
+            const details = getFarmerDetailsHtml().replace(/<br>/g, ", ").replace(/<b>/g,"").replace(/<\/b>/g,""); 
+            const bwName = getExtendedBoreWellName(); 
+            const projName = getExtendedProjectName(); 
+            const farmerLocName = getExtendedFarmerLocationName();
+            let gpx = `\uFEFF<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.0" creator="WebGPXTool" xmlns="http://www.topografix.com/GPX/1/0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/0 http://www.topografix.com/GPX/1/0/gpx.xsd">\n  <name>${projName}</name><desc>${WATERMARK_TEXT} - Area: ${calculatedAreaStr}\n${details}</desc><author>${WATERMARK_TEXT}</author><time>${new Date().toISOString()}</time>\n`; 
+            gpx += `  <wpt lat="${boreWellData.lat.toFixed(6)}" lon="${boreWellData.lon.toFixed(6)}"><name>${bwName}</name><desc>${details}</desc><sym>Drinking Water</sym></wpt>\n`; 
+            if (farmerLocationData) { gpx += `  <wpt lat="${farmerLocationData.lat.toFixed(6)}" lon="${farmerLocationData.lon.toFixed(6)}"><name>${farmerLocName}</name><desc>Farmer Details Location</desc><sym>Residence</sym></wpt>\n`; }
+            boundaryPoints.forEach(p => gpx += `  <wpt lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><name>${p.name}</name><sym>Flag</sym></wpt>\n`); 
+            boundaryPoints2.forEach(p => gpx += `  <wpt lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><name>${p.name}</name><sym>Flag</sym></wpt>\n`);
+            referencePoints.forEach(p => gpx += `  <wpt lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><name>${p.name}</name><sym>Pin</sym></wpt>\n`); 
+            let prev = null; 
+            boundaryPoints.forEach(p => { if (prev) { const mid = [(prev.lat+p.lat)/2, (prev.lon+p.lon)/2]; const d = map.distance([prev.lat, prev.lon], [p.lat, p.lon]); gpx += `  <wpt lat="${mid[0].toFixed(6)}" lon="${mid[1].toFixed(6)}"><name>${formatDistance(d)}</name><desc>Distance</desc><sym>Dot</sym></wpt>\n`; } prev = p; }); 
+            if (boundaryPoints.length > 0) { gpx += `  <rte><name>Boundary 1</name>\n`; boundaryPoints.forEach(p => gpx += `    <rtept lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><name>${p.name}</name></rtept>\n`); gpx += `  </rte>\n`; } 
+            if (boundaryPoints2.length > 0) { gpx += `  <rte><name>Boundary 2</name>\n`; boundaryPoints2.forEach(p => gpx += `    <rtept lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><name>${p.name}</name></rtept>\n`); gpx += `  </rte>\n`; }
+            gpx += `</gpx>`; 
+            downloadFile(gpx, 'project_legacy.gpx', 'application/gpx+xml'); 
+        };
+
+        // GPX v1.1
+        window.downloadGPX = function() {
+            if (!validateExport()) return; 
+            const details = getFarmerDetailsHtml().replace(/<br>/g, ", ").replace(/<b>/g,"").replace(/<\/b>/g,""); 
+            const bwName = getExtendedBoreWellName(); 
+            const projName = getExtendedProjectName(); 
+            const farmerLocName = getExtendedFarmerLocationName();
+            let gpx = `\uFEFF<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="WebGPXTool" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">\n  <metadata><name>${projName}</name><desc>${WATERMARK_TEXT} - Area: ${calculatedAreaStr}\n${details}</desc><author><name>${WATERMARK_TEXT}</name></author><time>${new Date().toISOString()}</time></metadata>\n`; 
+            gpx += `  <wpt lat="${boreWellData.lat.toFixed(6)}" lon="${boreWellData.lon.toFixed(6)}"><name>${bwName}</name><desc>${details}</desc><sym>Drinking Water</sym></wpt>\n`; 
+            if (farmerLocationData) { gpx += `  <wpt lat="${farmerLocationData.lat.toFixed(6)}" lon="${farmerLocationData.lon.toFixed(6)}"><name>${farmerLocName}</name><desc>Farmer Details Location</desc><sym>Residence</sym></wpt>\n`; }
+            boundaryPoints.forEach(p => { gpx += `  <wpt lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><name>${p.name}</name><sym>Flag, Blue</sym></wpt>\n`; });
+            boundaryPoints2.forEach(p => { gpx += `  <wpt lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><name>${p.name}</name><sym>Flag, Red</sym></wpt>\n`; });
+            referencePoints.forEach(p => { gpx += `  <wpt lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><name>${p.name}</name><sym>Pin, Green</sym></wpt>\n`; }); 
+            let prev = null; 
+            boundaryPoints.forEach(p => { if (prev) { const mid = [(prev.lat+p.lat)/2, (prev.lon+p.lon)/2]; const d = map.distance([prev.lat, prev.lon], [p.lat, p.lon]); gpx += `  <wpt lat="${mid[0].toFixed(6)}" lon="${mid[1].toFixed(6)}"><name>${formatDistance(d)}</name><desc>Distance</desc><sym>Dot</sym></wpt>\n`; } prev = p; }); 
+            if (boundaryPoints.length > 0) { gpx += `  <rte><name>Boundary 1</name>\n`; boundaryPoints.forEach(p => gpx += `    <rtept lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><name>${p.name}</name></rtept>\n`); gpx += `  </rte>\n`; } 
+            if (boundaryPoints2.length > 0) { gpx += `  <rte><name>Boundary 2</name>\n`; boundaryPoints2.forEach(p => gpx += `    <rtept lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"><name>${p.name}</name></rtept>\n`); gpx += `  </rte>\n`; }
+            gpx += `</gpx>`; 
+            downloadFile(gpx, 'project_v1.1.gpx', 'application/gpx+xml');
+        };
+
+        // KML
+        window.downloadKML = function() {
+            if (!validateExport()) return; 
+            const details = getFarmerDetailsHtml(); 
+            const bwName = getExtendedBoreWellName(); 
+            const projName = getExtendedProjectName(); 
+            const farmerLocName = getExtendedFarmerLocationName();
+            let kml = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>${projName}</name>\n`; 
+            kml += `<Placemark><name>${bwName}</name><description><![CDATA[${details}]]></description><Style><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/shapes/water.png</href></Icon></IconStyle></Style><Point><coordinates>${boreWellData.lon},${boreWellData.lat},0</coordinates></Point></Placemark>\n`; 
+            if (farmerLocationData) { kml += `<Placemark><name>${farmerLocName}</name><description>Farmer Location</description><Style><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/shapes/homegardenbusiness.png</href></Icon></IconStyle></Style><Point><coordinates>${farmerLocationData.lon},${farmerLocationData.lat},0</coordinates></Point></Placemark>\n`; }
+            boundaryPoints.forEach(p => kml += `<Placemark><name>${p.name}</name><Style><IconStyle><color>ffff0000</color></IconStyle></Style><Point><coordinates>${p.lon},${p.lat},0</coordinates></Point></Placemark>\n`); 
+            boundaryPoints2.forEach(p => kml += `<Placemark><name>${p.name}</name><Style><IconStyle><color>ff0000ff</color></IconStyle></Style><Point><coordinates>${p.lon},${p.lat},0</coordinates></Point></Placemark>\n`);
+            referencePoints.forEach(p => kml += `<Placemark><name>${p.name}</name><Style><IconStyle><color>ff00ff00</color></IconStyle></Style><Point><coordinates>${p.lon},${p.lat},0</coordinates></Point></Placemark>\n`); 
+            if (boundaryPoints.length > 0) { kml += `<Placemark><name>Boundary 1</name><Style><LineStyle><color>ffff0000</color><width>2</width></LineStyle></Style><LineString><coordinates>\n`; boundaryPoints.forEach(p => kml += `${p.lon},${p.lat},0\n`); kml += `</coordinates></LineString></Placemark>\n`; } 
+            if (boundaryPoints2.length > 0) { kml += `<Placemark><name>Boundary 2</name><Style><LineStyle><color>ff0000ff</color><width>2</width></LineStyle></Style><LineString><coordinates>\n`; boundaryPoints2.forEach(p => kml += `${p.lon},${p.lat},0\n`); kml += `</coordinates></LineString></Placemark>\n`; }
+            kml += `</Document></kml>`; 
+            downloadFile(kml, 'project.kml', 'application/vnd.google-earth.kml+xml');
+        };
+
+        // DWG
+        window.downloadDWG = function() {
+            if (!validateExport()) return;
+            
+            const centerLat = boreWellData.lat;
+            const centerLon = boreWellData.lon;
+            const degToRad = Math.PI / 180;
+            const R = 6378137; 
+            
+            function toMeters(lat, lon) {
+                const x = (lon - centerLon) * degToRad * R * Math.cos(centerLat * degToRad);
+                const y = (lat - centerLat) * degToRad * R;
+                return { x: x.toFixed(4), y: y.toFixed(4) };
+            }
+
+            let dxf = `0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
+
+            function addDxfPoint(x, y, layer, color) {
+                dxf += `0\nPOINT\n8\n${layer}\n62\n${color}\n10\n${x}\n20\n${y}\n30\n0.0\n`;
+            }
+            
+            function addDxfText(x, y, text, layer, height) {
+                dxf += `0\nTEXT\n8\n${layer}\n10\n${x}\n20\n${y}\n30\n0.0\n40\n${height}\n1\n${text}\n`;
+            }
+
+            addDxfPoint(0, 0, "BORE_WELL", 5); 
+            addDxfText(2, 2, getExtendedBoreWellName(), "LABELS", 2.5);
+
+            if (farmerLocationData) {
+                const pt = toMeters(farmerLocationData.lat, farmerLocationData.lon);
+                addDxfPoint(pt.x, pt.y, "FARMER_LOC", 30); 
+                addDxfText(parseFloat(pt.x)+2, parseFloat(pt.y)+2, "Farmer House", "LABELS", 2.5);
+            }
+
+            referencePoints.forEach((p, i) => {
+                const pt = toMeters(p.lat, p.lon);
+                addDxfPoint(pt.x, pt.y, "REFERENCES", 3); 
+                addDxfText(parseFloat(pt.x)+1, parseFloat(pt.y)+1, p.name || `Ref ${i+1}`, "LABELS", 1.5);
+            });
+
+            if (boundaryPoints.length > 0) {
+                dxf += `0\nLWPOLYLINE\n8\nBOUNDARY_1\n62\n5\n90\n${boundaryPoints.length}\n70\n1\n`; 
+                boundaryPoints.forEach(p => {
+                    const pt = toMeters(p.lat, p.lon);
+                    dxf += `10\n${pt.x}\n20\n${pt.y}\n`;
+                });
+                boundaryPoints.forEach((p, i) => {
+                    const pt = toMeters(p.lat, p.lon);
+                    addDxfText(parseFloat(pt.x)+0.5, parseFloat(pt.y)+0.5, `BP1-${i+1}`, "LABELS", 1.0);
+                });
+            }
+
+            if (boundaryPoints2.length > 0) {
+                dxf += `0\nLWPOLYLINE\n8\nBOUNDARY_2\n62\n1\n90\n${boundaryPoints2.length}\n70\n1\n`; 
+                boundaryPoints2.forEach(p => {
+                    const pt = toMeters(p.lat, p.lon);
+                    dxf += `10\n${pt.x}\n20\n${pt.y}\n`;
+                });
+                boundaryPoints2.forEach((p, i) => {
+                    const pt = toMeters(p.lat, p.lon);
+                    addDxfText(parseFloat(pt.x)+0.5, parseFloat(pt.y)+0.5, `BP2-${i+1}`, "LABELS", 1.0);
+                });
+            }
+
+            dxf += `0\nENDSEC\n0\nEOF`;
+            
+            downloadFile(dxf, 'survey_drawing.dxf', 'application/dxf');
+        };
+
+        // NEW: Update Label Styles Function
+        window.updateLabelStyles = function() {
+            const vColor = document.getElementById('villageColorPicker').value;
+            const vSize = document.getElementById('villageSizeInput').value + 'px';
+            const sColor = document.getElementById('surveyColorPicker').value;
+            const sSize = document.getElementById('surveySizeInput').value + 'px';
+            
+            const root = document.documentElement;
+            root.style.setProperty('--village-color', vColor);
+            root.style.setProperty('--village-size', vSize);
+            root.style.setProperty('--survey-color', sColor);
+            root.style.setProperty('--survey-size', sSize);
+        };
+
+        window.generateAIReport = async function() { 
+            if (!boreWellData) { alert("Please map the points first."); return; } 
+            window.toggleReportModal(); 
+            const contentDiv = document.getElementById('reportContent'); 
+            contentDiv.innerHTML = '<div class="flex justify-center p-8"><div class="loader"></div></div>'; 
+            const farmerName = document.getElementById('farmerName').value || "Unknown"; 
+            const village = document.getElementById('village').value || "Unknown"; 
+            const area = calculatedAreaStr; 
+            const lat = boreWellData.lat.toFixed(6); 
+            const lon = boreWellData.lon.toFixed(6); 
+            const prompt = ` Write a professional Land Survey Summary Report for the following data: - Farmer Name: ${farmerName} - Village: ${village} - Total Area: ${area} - Bore Well Location: ${lat}, ${lon} Enhancements: 1. Infer the likely climatic region based on the coordinates (India). 2. Suggest 3 suitable crops for this region/soil type in the "Agricultural Recommendations" section. 3. Provide a brief "Irrigation Advice" section. Format as Markdown. `; 
+            try { 
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${getEffectiveApiKey()}`; 
+                const payload = { contents: [{ parts: [{ text: prompt }] }] }; 
+                const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); 
+                if (!response.ok) throw new Error(`API Error: ${response.status}`); 
+                const data = await response.json(); 
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ""; 
+                contentDiv.innerHTML = marked.parse(text); 
+            } catch (error) { 
+                contentDiv.innerHTML = '<p class="text-red-600">Failed to generate report.</p>'; 
+            } 
+        };
+
+        window.toggleAIModal = function() { document.getElementById('aiModal').classList.toggle('hidden'); document.getElementById('aiResponseArea').classList.add('hidden'); document.getElementById('aiProcessBtn').innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Process Text'; document.getElementById('aiProcessBtn').disabled = false; };
+        window.toggleReportModal = function() { document.getElementById('reportModal').classList.toggle('hidden'); };
+        window.handlePasteButton = async function() { try { const items = await navigator.clipboard.read(); for (const item of items) { if (item.types.includes('image/png') || item.types.includes('image/jpeg')) { const blob = await item.getType(item.types[0]); if(confirm("Image detected on clipboard. Scan as Farmer Document?")) { window.scanFarmerDocument(blob); } return; } } alert("No image found on clipboard. Please take a screenshot (Win+Shift+S) first."); } catch (err) { alert("Please use Ctrl+V to paste the image."); } };
+        window.exportLoginLogs = async function() { if (!firebaseAvailable) { alert("Cloud features unavailable."); return; } if(!confirm("Download login history report?")) return; const btn = document.querySelector("button[onclick='window.exportLoginLogs()']"); const originalText = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Generating...'; btn.disabled = true; try { await authenticateUser(); const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'login_logs')); const docs = []; querySnapshot.forEach(doc => docs.push(doc.data())); if (docs.length === 0) { alert("No login records found."); btn.innerHTML = originalText; btn.disabled = false; return; } docs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); let csvContent = "Name,Mobile Number,Login Time,User ID\n"; docs.forEach(row => { const date = new Date(row.timestamp).toLocaleString().replace(/,/g, ''); const safeName = row.name ? `"${row.name.replace(/"/g, '""')}"` : "Unknown"; const safeMobile = row.mobile ? `"${row.mobile}"` : "Unknown"; csvContent += `${safeName},${safeMobile},"${date}","${row.uid}"\n`; }); const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.setAttribute("href", url); link.setAttribute("download", "user_login_report.csv"); document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url); alert("✅ Success! Log file downloaded."); } catch (e) { console.error("Export failed", e); alert("Failed to export logs. " + e.message); } finally { btn.innerHTML = originalText; btn.disabled = false; } };
+        window.loadReferenceOverlays = async function(fileList) { if (!fileList || fileList.length === 0) return; const statusEl = document.getElementById('refLayerStatus'); statusEl.classList.remove('hidden'); statusEl.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Loading Layer(s)...'; statusEl.className = "text-[10px] text-blue-600 mt-1 font-bold"; if (!referenceLayerGroup) { referenceLayerGroup = L.featureGroup().addTo(map); } let totalShapes = 0; for (let f = 0; f < fileList.length; f++) { const fileBlob = fileList[f]; try { let kmlContent = ""; if (fileBlob.name.toLowerCase().endsWith('.kmz')) { const zip = await JSZip.loadAsync(fileBlob); const kmlFileName = Object.keys(zip.files).find(n => n.toLowerCase().endsWith('.kml')); if (!kmlFileName) throw new Error("No KML found inside KMZ."); kmlContent = await zip.file(kmlFileName).async("string"); } else { kmlContent = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = (e) => resolve(e.target.result); reader.onerror = reject; reader.readAsText(fileBlob); }); } const parser = new DOMParser(); const xmlDoc = parser.parseFromString(kmlContent, "text/xml"); const placemarks = xmlDoc.getElementsByTagName('Placemark'); if (placemarks.length === 0) continue; for (let i = 0; i < placemarks.length; i++) { const pm = placemarks[i]; let name = pm.getElementsByTagName('name')[0]?.textContent || `Shape ${i}`; let props = { name: name }; const extendedData = pm.getElementsByTagName('ExtendedData')[0]; if (extendedData) { const simpleDatas = extendedData.getElementsByTagName('SimpleData'); for (let j = 0; j < simpleDatas.length; j++) { const sd = simpleDatas[j]; const attrName = sd.getAttribute('name'); const val = sd.textContent.trim(); props[attrName.toLowerCase()] = val; if (attrName.toLowerCase().includes('survey') || attrName.toLowerCase().includes('lpm') || attrName.toLowerCase() === 'name') { name = val; } } } const numberMatch = name.match(/(\d+(?:\/\d+)*[A-Za-z]*)$/); if (numberMatch) { name = numberMatch[1]; } 
+        
+        let surveyNo = name;
+        let villageName = document.getElementById('defaultVillageName').value || ""; 
+
+        for(let key in props) {
+            let k = key.toLowerCase();
+            if(k.includes('village')) villageName = props[key];
+            if(k.includes('survey') || k.includes('lpm') || k === 'name') surveyNo = props[key];
+        }
+
+        let labelHtml = "";
+        if(villageName) {
+            labelHtml = `<div class="ref-label-content"><span class="village-text">${villageName}</span><span class="survey-text">${surveyNo}</span></div>`;
+        } else {
+            labelHtml = `<div class="ref-label-content"><span class="survey-text">${surveyNo}</span></div>`;
+        }
+
+        const point = pm.getElementsByTagName('Point')[0]; if (point) { const coordsStr = point.getElementsByTagName('coordinates')[0]?.textContent; if(coordsStr) { const parts = coordsStr.trim().split(','); if(parts.length >= 2) { const lat = parseFloat(parts[1]); const lon = parseFloat(parts[0]); const marker = L.circleMarker([lat, lon], { radius: 0, opacity: 0, fillOpacity: 0, color: 'transparent' }); marker.bindTooltip(labelHtml, { permanent: true, direction: "center", className: "ref-label" }); marker.addTo(referenceLayerGroup); referenceFeatures.push({ layer: marker, properties: props, originalStyle: { color: 'transparent', weight: 0 } }); totalShapes++; } } continue; } const polygon = pm.getElementsByTagName('Polygon')[0]; const lineString = pm.getElementsByTagName('LineString')[0]; let coordsStr = ""; if (polygon) coordsStr = polygon.getElementsByTagName('coordinates')[0]?.textContent; else if (lineString) coordsStr = lineString.getElementsByTagName('coordinates')[0]?.textContent; if (coordsStr) { const latLngs = []; const parts = coordsStr.trim().split(/\s+/); parts.forEach(part => { const c = part.split(','); if (c.length >= 2) { const lat = parseFloat(c[1]); const lon = parseFloat(c[0]); if (!isNaN(lat) && !isNaN(lon)) latLngs.push([lat, lon]); } }); if (latLngs.length > 0) { const defaultColor = '#FF1493'; const layer = L.polygon(latLngs, { color: defaultColor, weight: 4, fillOpacity: 0.0, fillColor: 'transparent' }); let popupContent = `<b>Survey No: ${name}</b><hr class="my-1 border-gray-300">`; for (const key in props) { if(key !== 'name' && key !== 'style') { popupContent += `<div class="text-xs"><b>${key}:</b> ${props[key]}</div>`; } } layer.bindPopup(popupContent); layer.bindTooltip(labelHtml, { permanent: true, direction: "center", className: "ref-label" }); layer.addTo(referenceLayerGroup); referenceFeatures.push({ layer: layer, properties: props, originalStyle: { color: defaultColor, weight: 4 } }); totalShapes++; } } } } catch (error) { console.error(`Error loading ${fileBlob.name}:`, error); } } if (totalShapes > 0) { map.fitBounds(referenceLayerGroup.getBounds()); statusEl.innerHTML = `<i class="fa-solid fa-check"></i> Loaded ${totalShapes} items.`; statusEl.className = "text-[10px] text-green-600 mt-1 font-bold"; } else { statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> No valid data found.`; statusEl.className = "text-[10px] text-red-600 mt-1 font-bold"; } document.getElementById('refOverlayInput').value = ''; };
+        window.clearReferenceLayer = function() { if (referenceLayerGroup) { map.removeLayer(referenceLayerGroup); referenceLayerGroup = null; referenceFeatures = []; const statusEl = document.getElementById('refLayerStatus'); statusEl.classList.add('hidden'); alert("Reference Layer Cleared."); } };
+        window.filterReferenceLayers = function(query) { if (!referenceLayerGroup || referenceFeatures.length === 0) return; const term = query.toLowerCase(); referenceFeatures.forEach(item => { let match = false; if (!term) { match = true; } else { for (const key in item.properties) { if (String(item.properties[key]).toLowerCase().includes(term)) { match = true; break; } } } if (match) { if (!referenceLayerGroup.hasLayer(item.layer)) { referenceLayerGroup.addLayer(item.layer); } } else { if (referenceLayerGroup.hasLayer(item.layer)) { referenceLayerGroup.removeLayer(item.layer); } } }); };
+        window.styleReferenceLayers = function(color) { if (!referenceLayerGroup || referenceFeatures.length === 0) return; referenceFeatures.forEach(item => { if (item.layer instanceof L.Polygon || item.layer instanceof L.Polyline) { item.layer.setStyle({ color: color }); } }); document.querySelectorAll('.style-btn').forEach(btn => { btn.classList.remove('active', 'scale-110', 'border-blue-500'); }); };
+        window.toggleReferenceLabels = function() { const mapContainer = document.getElementById('map'); mapContainer.classList.toggle('hide-ref-labels'); };
+        window.clearTerrainAnalysis = function() { if (slopeLayerGroup) { map.removeLayer(slopeLayerGroup); slopeLayerGroup = null; } if (contourLayerGroup) { map.removeLayer(contourLayerGroup); contourLayerGroup = null; } document.getElementById('terrainStats').classList.add('hidden'); document.getElementById('sublineVal').innerText = '-'; };
+        
+        window.analyzeTerrain = async function() {
+            if (boundaryPoints.length < 3) {
+                alert("Please define a boundary (Blue) with at least 3 points first.");
+                return;
+            }
+
+            const btn = document.getElementById('terrainBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...';
+            btn.disabled = true;
+
+            try {
+                let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+                boundaryPoints.forEach(p => {
+                    if (p.lat < minLat) minLat = p.lat;
+                    if (p.lat > maxLat) maxLat = p.lat;
+                    if (p.lon < minLon) minLon = p.lon;
+                    if (p.lon > maxLon) maxLon = p.lon;
+                });
+
+                const samplePoints = [...boundaryPoints];
+                const steps = 4;
+                const latStep = (maxLat - minLat) / (steps + 1);
+                const lonStep = (maxLon - minLon) / (steps + 1);
+                
+                for(let i=1; i<=steps; i++) {
+                    for(let j=1; j<=steps; j++) {
+                        const pt = { lat: minLat + i*latStep, lon: minLon + j*lonStep };
+                        if (isPointInPoly(pt, boundaryPoints)) {
+                            samplePoints.push(pt);
+                        }
+                    }
+                }
+                const centerLat = (minLat + maxLat) / 2;
+                const centerLon = (minLon + maxLon) / 2;
+                samplePoints.push({ lat: centerLat, lon: centerLon }); 
+
+                const queryLats = samplePoints.map(p => p.lat.toFixed(6));
+                const queryLons = samplePoints.map(p => p.lon.toFixed(6));
+                const apiUrl = `https://api.open-meteo.com/v1/elevation?latitude=${queryLats.join(',')}&longitude=${queryLons.join(',')}`;
+
+                const response = await fetch(apiUrl);
+                if (!response.ok) throw new Error("Elevation API Failed");
+                const data = await response.json();
+                const elevations = data.elevation;
+
+                if (!elevations || elevations.length !== samplePoints.length) throw new Error("Mismatch in elevation data.");
+
+                samplePoints.forEach((p, i) => { p.ele = elevations[i]; });
+
+                const origin = { lat: centerLat, lon: centerLon, ele: elevations[elevations.length-1] }; 
+                const cosLat = Math.cos(centerLat * Math.PI / 180);
+                let sumX=0, sumY=0, sumZ=0, sumXX=0, sumYY=0, sumXY=0, sumXZ=0, sumYZ=0;
+                const n = samplePoints.length;
+                let minElev = Infinity, maxElev = -Infinity;
+                let minPoint = null, maxPoint = null;
+
+                samplePoints.forEach(p => {
+                    if(p.ele < minElev) { minElev = p.ele; minPoint = p; }
+                    if(p.ele > maxElev) { maxElev = p.ele; maxPoint = p; }
+                    const x = (p.lon - origin.lon) * 111320 * cosLat;
+                    const y = (p.lat - origin.lat) * 111320;
+                    const z = p.ele;
+                    sumX += x; sumY += y; sumZ += z;
+                    sumXX += x*x; sumYY += y*y; sumXY += x*y;
+                    sumXZ += x*z; sumYZ += y*z;
+                });
+
+                const meanX = sumX/n, meanY = sumY/n, meanZ = sumZ/n;
+                let Sxx=0, Syy=0, Sxy=0, Sxz=0, Syz=0;
+                samplePoints.forEach(p => {
+                    const x = (p.lon - origin.lon) * 111320 * cosLat;
+                    const y = (p.lat - origin.lat) * 111320;
+                    const z = p.ele;
+                    Sxx += (x-meanX)*(x-meanX);
+                    Syy += (y-meanY)*(y-meanY);
+                    Sxy += (x-meanX)*(y-meanY);
+                    Sxz += (x-meanX)*(z-meanZ);
+                    Syz += (y-meanY)*(z-meanZ);
+                });
+
+                const det = Sxx * Syy - Sxy * Sxy;
+                const a = (Syy * Sxz - Sxy * Syz) / det;
+                const b = (Sxx * Syz - Sxy * Sxz) / det;
+                const magnitude = Math.sqrt(a*a + b*b);
+                const slopePct = (magnitude * 100).toFixed(1);
+                let bearing = (Math.atan2(-a, -b) * 180 / Math.PI);
+                if (bearing < 0) bearing += 360;
+
+                let sublineText = "";
+                if ((bearing >= 315 || bearing <= 45) || (bearing >= 135 && bearing <= 225)) {
+                    sublineText = "North-South (N-S)";
+                } else {
+                    sublineText = "East-West (E-W)";
+                }
+
+                document.getElementById('maxElev').innerText = `${maxElev.toFixed(1)}m`;
+                document.getElementById('minElev').innerText = `${minElev.toFixed(1)}m`;
+                document.getElementById('avgSlope').innerText = `${slopePct}%`;
+                
+                const statContainer = document.getElementById('terrainStats');
+                let sublineEl = document.getElementById('sublineStat');
+                if(!sublineEl) {
+                     sublineEl = document.createElement('div');
+                     sublineEl.id = 'sublineStat';
+                     sublineEl.className = "flex justify-between font-bold text-purple-700 mt-1 pt-1 border-t border-gray-300";
+                     sublineEl.innerHTML = `<span>Sublines:</span> <span id="sublineVal">-</span>`;
+                     statContainer.appendChild(sublineEl);
+                }
+                document.getElementById('sublineVal').innerText = sublineText.split('(')[1].replace(')','');
+                statContainer.classList.remove('hidden');
+
+                if (slopeLayerGroup) map.removeLayer(slopeLayerGroup);
+                slopeLayerGroup = L.featureGroup().addTo(map);
+
+                const highIcon = L.divIcon({ className: 'high-point-icon', html: `▲`, iconSize: [20, 20] });
+                L.marker([maxPoint.lat, maxPoint.lon], { icon: highIcon }).bindTooltip(`Max: ${maxPoint.ele}m`).addTo(slopeLayerGroup);
+                const lowIcon = L.divIcon({ className: 'low-point-icon', html: `▼`, iconSize: [20, 20] });
+                L.marker([minPoint.lat, minPoint.lon], { icon: lowIcon }).bindTooltip(`Min: ${minPoint.ele}m`).addTo(slopeLayerGroup);
+
+                const arrowIcon = L.divIcon({
+                    className: 'slope-arrow-icon',
+                    html: `<div style="transform: rotate(${bearing}deg); display: flex; flex-direction: column; align-items: center;">
+                            <i class="fa-solid fa-arrow-up" style="font-size: 40px; color: purple; text-shadow: 2px 2px 0px white;"></i>
+                           </div>
+                           <div style="background:white; padding:2px 5px; border-radius:4px; font-weight:bold; font-size:12px; border:1px solid purple; margin-top:5px; white-space:nowrap; text-align:center;">
+                             ${slopePct}%<br>${sublineText}
+                           </div>`,
+                    iconSize: [120, 100],
+                    iconAnchor: [60, 40] 
+                });
+                L.marker([centerLat, centerLon], { icon: arrowIcon }).addTo(slopeLayerGroup);
+
+                alert(`Terrain Analysis:\n\nAvg Slope: ${slopePct}%\nDirection: ${bearing.toFixed(0)}°\nRec. Subline: ${sublineText}`);
+
+            } catch (error) {
+                console.error(error);
+                alert("Analysis failed: " + error.message);
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        };
+
+        window.generateContours = async function() {
+            if (boundaryPoints.length < 3) {
+                alert("Please define a boundary (Blue) first.");
+                return;
+            }
+            const btn = document.getElementById('contourBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...';
+            btn.disabled = true;
+
+            try {
+                let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+                boundaryPoints.forEach(p => {
+                    if (p.lat < minLat) minLat = p.lat;
+                    if (p.lat > maxLat) maxLat = p.lat;
+                    if (p.lon < minLon) minLon = p.lon;
+                    if (p.lon > maxLon) maxLon = p.lon;
+                });
+                const pad = 0.0005;
+                minLat -= pad; maxLat += pad;
+                minLon -= pad; maxLon += pad;
+                const gridW = 10;
+                const gridH = 10;
+                const latStep = (maxLat - minLat) / (gridH - 1);
+                const lonStep = (maxLon - minLon) / (gridW - 1);
+                let queryLats = [];
+                let queryLons = [];
+                for(let y=0; y<gridH; y++) {
+                    for(let x=0; x<gridW; x++) {
+                        const lat = minLat + y * latStep;
+                        const lon = minLon + x * lonStep;
+                        queryLats.push(lat.toFixed(6));
+                        queryLons.push(lon.toFixed(6));
+                    }
+                }
+                const apiUrl = `https://api.open-meteo.com/v1/elevation?latitude=${queryLats.join(',')}&longitude=${queryLons.join(',')}`;
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                     const errText = await response.text();
+                     throw new Error(`Elevation API Failed: ${response.status} - ${errText}`);
+                }
+                const data = await response.json();
+                const elevations = data.elevation;
+                if (!elevations) throw new Error("No elevation data returned");
+
+                const contours = d3.contours().size([gridW, gridH]).thresholds(10)(elevations);
+                    
+                if (contourLayerGroup) map.removeLayer(contourLayerGroup);
+                contourLayerGroup = L.featureGroup().addTo(map);
+                
+                contours.forEach(contour => {
+                    const elevationValue = contour.value;
+                    contour.coordinates.forEach(polygon => {
+                        polygon.forEach(ring => {
+                            const latLngs = ring.map(pt => {
+                                const lon = minLon + (pt[0]) * lonStep;
+                                const lat = minLat + (pt[1]) * latStep; 
+                                return [lat, lon]; 
+                            });
+                            const polyline = L.polyline(latLngs, {
+                                color: '#d97706',
+                                weight: 1.5,
+                                opacity: 0.8
+                            }).addTo(contourLayerGroup);
+                            polyline.bindTooltip(`${elevationValue} m`, { permanent: false, direction: 'center', className: 'contour-label' });
+                        });
+                    });
+                });
+                alert("Contours Generated!");
+            } catch (error) {
+                console.error(error);
+                alert("Failed to generate contours: " + error.message);
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        };
+        
+        window.generateImageReport = function() {
+            if (!boreWellData && boundaryPoints.length === 0) {
+                alert("Please add some data to the map first.");
+                return;
+            }
+
+            const container = document.getElementById('report-generator-container');
+            const dateStr = new Date().toLocaleDateString();
+            const farmerName = document.getElementById('farmerName').value || "N/A";
+            const fatherName = document.getElementById('fatherName').value || "N/A";
+            const village = document.getElementById('village').value || "N/A";
+            const mandal = document.getElementById('mandal').value || "N/A";
+            
+            let html = `
+                <div class="bg-white border-2 border-gray-800 p-4">
+                    <div class="text-center border-b-2 border-gray-800 pb-2 mb-4">
+                        <h1 class="text-2xl font-bold uppercase tracking-widest text-gray-900">Land Survey Field Report</h1>
+                        <p class="text-sm text-gray-500 font-mono">Date: ${dateStr}</p>
+                    </div>
+
+                    <div class="mb-4">
+                        <h2 class="text-xs font-bold text-gray-400 uppercase border-b border-gray-200 mb-1">Farmer Details</h2>
+                        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                            <div><span class="font-bold">Name:</span> ${farmerName}</div>
+                            <div><span class="font-bold">Father:</span> ${fatherName}</div>
+                            <div><span class="font-bold">Village:</span> ${village}</div>
+                            <div><span class="font-bold">Mandal:</span> ${mandal}</div>
+                        </div>
+                    </div>
+
+                    <div class="w-full aspect-square border border-gray-300 mb-4 relative bg-gray-100" id="report-map-slot">
+                        <div class="absolute inset-0 flex items-center justify-center text-gray-400 text-xs">Generating Map Snapshot...</div>
+                    </div>
+
+                    <div class="mb-4">
+                        <h2 class="text-xs font-bold text-gray-400 uppercase border-b border-gray-200 mb-1">Survey Statistics</h2>
+                         <div class="grid grid-cols-2 gap-4 text-sm font-bold bg-gray-50 p-2 rounded">
+                            <div class="text-blue-700">Area 1: ${calculatedAreaStr}</div>
+                            ${calculatedAreaStr2 !== "0 Sq M" ? `<div class="text-red-700">Area 2: ${calculatedAreaStr2}</div>` : ''}
+                        </div>
+                        <div class="mt-2 text-xs">
+                            <span class="font-bold">Bore Well:</span> ${boreWellData ? boreWellData.name : "Not Marked"}
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <h2 class="text-xs font-bold text-gray-400 uppercase border-b border-gray-200 mb-1">Boundary Coordinates (First 8)</h2>
+                        <div class="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                            <div>
+                                <strong class="text-blue-600 block mb-0.5">Boundary 1 (Blue)</strong>
+                                ${boundaryPoints.slice(0, 8).map((p, i) => `<div>${i+1}. ${decimalToDM(p.lat, true)}, ${decimalToDM(p.lon, false)}</div>`).join('')}
+                            </div>
+                             ${boundaryPoints2.length > 0 ? `
+                            <div>
+                                <strong class="text-red-600 block mb-0.5">Boundary 2 (Red)</strong>
+                                ${boundaryPoints2.slice(0, 8).map((p, i) => `<div>${i+1}. ${decimalToDM(p.lat, true)}, ${decimalToDM(p.lon, false)}</div>`).join('')}
+                            </div>` : ''}
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-2 border-t border-gray-800 text-center text-[10px] text-gray-400 font-bold uppercase">
+                        Generated by GPX Waypoint Manager
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+            
+            const controls = document.getElementById('mapControls');
+            controls.style.display = 'none';
+
+            html2canvas(document.getElementById('map'), {
+                useCORS: true,
+                allowTaint: false, 
+                logging: false,
+                backgroundColor: null,
+                scale: 1, 
+                ignoreElements: (element) => {
+                    return element.classList.contains('leaflet-control-zoom');
+                }
+            }).then(canvas => {
+                controls.style.display = 'flex';
+                const img = document.createElement('img');
+                try {
+                    img.src = canvas.toDataURL('image/jpeg', 0.8);
+                } catch (e) {
+                    console.warn("Canvas tainted, using placeholder", e);
+                    const slot = document.getElementById('report-map-slot');
+                    slot.innerHTML = '<div class="flex items-center justify-center h-full bg-gray-100 text-gray-500 text-center p-4">Map snapshot unavailable due to browser security restrictions.<br>(Try Street View)</div>';
+                    finishReportGeneration(farmerName);
+                    return;
+                }
+                
+                img.className = "w-full h-full object-cover";
+                const slot = document.getElementById('report-map-slot');
+                slot.innerHTML = '';
+                slot.appendChild(img);
+
+                finishReportGeneration(farmerName);
+
+            }).catch(err => {
+                controls.style.display = 'flex';
+                console.error("Map capture failed", err);
+                finishReportGeneration(farmerName);
+            });
+            
+            function finishReportGeneration(fName) {
+                setTimeout(() => {
+                    html2canvas(container, {
+                        scale: 1.5, 
+                        backgroundColor: '#ffffff'
+                    }).then(finalCanvas => {
+                        const link = document.createElement('a');
+                        link.download = `Field_Report_${fName.replace(/\s+/g, '_')}.jpg`;
+                        link.href = finalCanvas.toDataURL('image/jpeg', 0.7); 
+                        link.click();
+                    }).catch(e => {
+                        console.error("Final report gen failed", e);
+                        alert("Failed to generate final report image.");
+                    });
+                }, 200); 
+            }
+        };
+
+        // Initialize
+        window.initMap();
+
+    </script>
+</body>
+</html>
